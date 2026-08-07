@@ -93,6 +93,4 @@ Default hyperparameters used in `CONFIG`:
 | `lr_backbone_stage2` | `1e-5` | Learning rate for backbones in Stage 2 |
 | `focal_gamma` | `2.0` | Gamma parameter for multi-task Focal Loss |
 
-## License
 
-This project is licensed under the MIT License.
