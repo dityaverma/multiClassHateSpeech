@@ -1,0 +1,28 @@
+# Byte-compiled / optimized files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.venv/
+venv/
+env/
+ENV/
+
+# Jupyter Notebook Checkpoints
+.ipynb_checkpoints/
+
+# Data, Caches, & Model Weights
+dataset/raw/
+cache/
+outputs/
+reports/
+huggingface_cache/
+*.pt
+*.pth
+*.bin
+*.safetensors
+
+# OS metadata
+.DS_Store
+Thumbs.db
