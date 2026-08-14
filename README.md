@@ -883,85 +883,7 @@ For each language, the pipeline records:
 
 The final prediction outputs are written separately for Tamil and Telugu and are kept independent of the validation analysis.
 
-# 34. Limitations
-
-### Data imbalance
-
-Rare classes remain difficult despite class-balanced sampling and Focal Loss.
-
-### Statistical association is not causation
-
-Cramér's V identifies association, not causal dependency.
-
-### Pairwise relationships can be misleading
-
-Majority-class skew can make simple pairwise rules unreliable.
-
-### Higher-order relationships have support constraints
-
-Some combinations occur rarely, so a perfect conditional probability does not automatically imply generalization.
-
-### Few-shot GPT variability
-
-GPT-based few-shot predictions depend on prompt examples and may be inconsistent for minority multiclass categories.
-
-### Optional Qwen features
-
-Qwen support depends on precomputed cached representations and is disabled in the default configuration.
-
----
-
-# 35. Reproducibility
-
-The training and inference pipeline uses deterministic seeding, local model caching, dynamic path resolution and complete checkpoint state.
-
-Each saved checkpoint contains:
-
-- Model state
-- Optimizer state
-- Scheduler state
-- Mixed-precision scaler state
-- Training epoch
-- Validation metrics
-- Optimized thresholds
-- Run configuration
-
-Tamil and Telugu are processed independently, with GPU memory released between language runs.
-
-# 36. Project Structure
-
-```text
-.
-├── final_multimodal_hasoc_architecture_FIXED.ipynb
-├── architecture.svg
-├── dataset/
-│   ├── raw/
-│   │   ├── Tamil_HASOC/
-│   │   └── Telugu_HASOC/
-│   └── processed/
-│       └── splits/
-│           └── paddleocr/
-│               ├── tamil/
-│               └── telugu/
-│
-├── cache/
-│   ├── tamil/
-│   │   └── qwen_features/
-│   └── telugu/
-│       └── qwen_features/
-│
-├── models/
-├── outputs/
-├── reports/
-│   ├── dataset_eda/
-│   └── error_analysis/
-│
-└── relationship_analysis/
-```
-
----
-
-# 37. Key Configuration
+# 34. Key Configuration
 
 ```python
     "siglip_model_name": "google/siglip-base-patch16-224",
@@ -1118,3 +1040,157 @@ If this system is used in a research submission, cite the underlying benchmark/s
 - Optional Qwen2.5-VL cached representations
 
 **Implementation basis:** `final_multimodal_hasoc_architecture_FIXED.ipynb`
+
+# Statistical Relationship Analysis with Cramér's V
+
+Cramér's V is used to measure the strength of association between two categorical variables in the training data.
+
+For every pair of tasks, a contingency table is first constructed. The table counts how frequently each combination of category values occurs. A Chi-square test is then applied to this contingency table, and the resulting statistic is converted into Cramér's V.
+
+The resulting value ranges from 0 to 1:
+
+- **0** indicates little or no association.
+- **Higher values** indicate stronger association between the categorical variables.
+
+For example, the analysis evaluates relationships such as:
+
+```text
+Sentiment <-> Sarcasm
+Vulgarity <-> Abuse
+Sentiment <-> Abuse
+Sentiment <-> Vulgarity
+Sarcasm <-> Abuse
+Sarcasm <-> Vulgarity
+```
+
+The analysis is performed independently for Tamil and Telugu because the label distributions and task dependencies can differ between the two languages.
+
+## Why Cramér's V was used
+
+The objective was not to assume that the five prediction tasks are independent. Some task combinations show useful statistical dependencies in the training data.
+
+However, a simple pairwise relationship can be misleading when the dataset is highly imbalanced. For example, if one category represents the large majority of the samples, a pairwise rule may appear useful mainly because of the majority-class distribution.
+
+Therefore, Cramér's V is used as an initial statistical measure to identify potentially meaningful relationships rather than directly converting every pairwise association into a prediction rule.
+
+## Conditional Relationship Analysis
+
+After identifying useful associations, the analysis examines directional conditional relationships.
+
+For a condition and an outcome, the conditional percentage is calculated as:
+
+```text
+Conditional Percentage =
+Count(condition and outcome) / Count(condition) * 100
+```
+
+For example:
+
+```text
+Neutral + Not Vulgar + Non-Abusive
+                ->
+            Sarcasm = Yes
+```
+
+The analysis records:
+
+- The condition
+- The predicted outcome
+- Number of samples satisfying the condition
+- Number of samples supporting the outcome
+- Conditional percentage
+
+This allows high-confidence relationships to be distinguished from relationships that are based on very few observations.
+
+## Higher-Order Relationships
+
+Because pairwise relationships can be affected by data skewness, the analysis does not stop at two-category relationships.
+
+It searches for:
+
+```text
+Pair:
+A + B -> C
+
+Triplet:
+A + B + C -> D
+
+Four-way:
+A + B + C + D -> E
+```
+
+Only logically valid combinations of the available task categories are considered.
+
+This allows the system to exploit relationships between **multiple task predictions simultaneously** instead of relying on a single pairwise dependency.
+
+# Project Structure
+
+```text
+.
+├── final_multimodal_hasoc_architecture_FIXED.ipynb
+│   └── Main training, validation, inference and evaluation pipeline
+│
+├── architecture.png
+│   └── Overview of the proposed multimodal architecture
+│
+├── dataset/
+│   ├── raw/
+│   │   ├── Tamil_HASOC/
+│   │   └── Telugu_HASOC/
+│   │
+│   └── processed/
+│       └── splits/
+│           └── paddleocr/
+│               ├── tamil/
+│               └── telugu/
+│
+├── cache/
+│   ├── tamil/
+│   │   └── qwen_features/
+│   │       └── Cached Qwen2.5-VL representations
+│   │
+│   └── telugu/
+│       └── qwen_features/
+│           └── Cached Qwen2.5-VL representations
+│
+├── models/
+│   ├── tamil/
+│   │   ├── checkpoints
+│   │   ├── thresholds.json
+│   │   └── run_config.json
+│   │
+│   └── telugu/
+│       ├── checkpoints
+│       ├── thresholds.json
+│       └── run_config.json
+│
+├── outputs/
+│   ├── tamil_predictions.csv
+│   ├── tamil_predictions_probs.csv
+│   ├── telugu_predictions.csv
+│   └── telugu_predictions_probs.csv
+│
+├── reports/
+│   ├── dataset_eda/
+│   │   └── Dataset statistics and exploratory analysis
+│   │
+│   └── error_analysis/
+│       ├── Confusion matrices
+│       ├── Classification reports
+│       ├── Low-confidence predictions
+│       └── Validation error analysis
+│
+└── relationship_analysis/
+    ├── tamil_cramers_v.csv
+    ├── telugu_cramers_v.csv
+    ├── tamil_conditional_pairs_gt95.csv
+    ├── telugu_conditional_pairs_gt95.csv
+    ├── tamil_conditional_triplets_gt95.csv
+    ├── telugu_conditional_triplets_gt95.csv
+    ├── tamil_conditional_four_way_gt95.csv
+    ├── telugu_conditional_four_way_gt95.csv
+    ├── tamil_all_gt95_relationships.csv
+    ├── telugu_all_gt95_relationships.csv
+    └── tamil_vs_telugu_cramers_v.csv
+
+The same procedure is applied separately to Tamil and Telugu training data, and the resulting relationships can be used as an additional prediction-refinement signal.
