@@ -1,4 +1,4 @@
-# Multi-Modal Harmful Content Detection for Tamil & Telugu Memes
+# Multi-Modal Harmful Content Detection for Tamil & Telugu Memes(using PADDle ocr for the binary classification and fewShot for sentiments and target for submission)
 
 <p align="center">
   <img src="architecture.png" alt="Multimodal HASOC architecture" width="100%">
