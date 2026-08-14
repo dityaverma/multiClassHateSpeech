@@ -1,8 +1,18 @@
 # Multi-Modal Harmful Content Detection for Tamil & Telugu Memes
 
+<p align="center">
+  <img src="architecture.png" alt="Multimodal HASOC architecture" width="100%">
+</p>
+
+<p align="center">
+  <b>Multimodal • Multi-Task • Cross-Modal Attention • Task-Aware Gating • Statistical Relationship Analysis</b>
+</p>
+
+---
+
 ## Abstract
 
-We present a multimodal multi-task framework for harmful-content analysis in **Tamil and Telugu memes**. The system jointly models the visual content of a meme and the text extracted from it using OCR. Visual information is encoded with **SigLIP**, while OCR and contextual text are represented using **IndicBERTv2**. The modality-specific representations are projected into a shared latent space and fused through a **tri-modal cross-attention block**, followed by Transformer-based fusion, learned attention pooling, and a task interaction gate.
+We present a multimodal multi-task framework for harmful-content analysis in **Tamil and Telugu memes**. The system jointly models the visual content of a meme and the text extracted from it using [...]
 
 The system predicts five related tasks:
 
@@ -12,11 +22,11 @@ The system predicts five related tasks:
 - **Abuse**
 - **Target**
 
-The training pipeline additionally addresses severe class imbalance using a **multi-task weighted sampler, class-balanced Focal Loss, task-level loss weighting, staged fine-tuning, and validation-based threshold optimization**.
+The training pipeline additionally addresses severe class imbalance using a **multi-task weighted sampler, class-balanced Focal Loss, task-level loss weighting, staged fine-tuning, and validation-[...]
 
-A separate statistical analysis layer studies dependencies among the categorical labels using **Cramér's V and conditional probability**. Rather than blindly applying pairwise label relationships, we search for **logically valid multi-category configurations** involving pairs, triplets, and four-way combinations. This is motivated by the strong class skew present in the data: an apparent pairwise dependency can otherwise be dominated by majority classes.
+A separate statistical analysis layer studies dependencies among the categorical labels using **Cramér's V and conditional probability**. Rather than blindly applying pairwise label relationships[...]
 
-We also explored **few-shot GPT-based semantic analysis** for difficult multiclass cases, particularly Sentiment and Target. This component is treated as an auxiliary analysis/prediction strategy rather than being claimed as part of the core PyTorch forward pass in the submitted notebook.
+We also explored **few-shot GPT-based semantic analysis** for difficult multiclass cases, particularly Sentiment and Target. This component is treated as an auxiliary analysis/prediction strategy [...]
 
 ---
 
@@ -108,6 +118,7 @@ with a 768-dimensional hidden representation.
 
 The visual tokens are projected to the common fusion dimension:
 
+
 through a nonlinear projection block.
 
 The notebook explicitly configures SigLIP with `siglip_hidden_dim=768` and `d_fusion=256`. fileciteturn36file0L196-L214
@@ -175,7 +186,7 @@ However, the current configuration sets:
 'use_qwen_features': False
 ```
 
-because the notebook expects precomputed Qwen `.pt` features and does not generate them inside the core training loop. Therefore, Qwen is an **optional extension**, not part of the default forward pass. fileciteturn36file0L196-L210
+because the notebook expects precomputed Qwen `.pt` features and does not generate them inside the core training loop. Therefore, Qwen is an **optional extension**, not part of the default forwar[...]
 
 ---
 
@@ -329,7 +340,7 @@ The preprocessing removes redundant repetitions of:
 
 and collapses repeated whitespace.
 
-The implementation deliberately avoids aggressive language-specific normalization so that Tamil/Telugu characters, code-mixed text and semantic cues remain available to IndicBERT. fileciteturn36file0L605-L616
+The implementation deliberately avoids aggressive language-specific normalization so that Tamil/Telugu characters, code-mixed text and semantic cues remain available to IndicBERT. fileciteturn36f[...]
 
 ---
 
@@ -498,8 +509,6 @@ Vulgarity
 Abuse
 ```
 
-the validation probabilities are searched over:
-
 and the threshold producing the highest validation Macro-F1 is retained.
 
 This is performed **only on the validation set**. fileciteturn37file0L336-L354
@@ -665,25 +674,37 @@ The strongest relationships can therefore be language-specific.
 
 # 26. Few-Shot GPT Analysis
 
-We additionally explored **few-shot GPT-based semantic prediction/analysis** for difficult multiclass cases.
+We additionally used **few-shot GPT-based semantic analysis** for difficult multiclass cases, particularly **Sentiment and Target**.
 
-The motivation is that a large language/vision-language model can sometimes recognize semantic patterns in a meme that are difficult for a supervised classifier to learn from a relatively small and skewed dataset.
+The motivation was that meme interpretation depends not only on the OCR text but also on the **visual context of the meme**. Facial expressions, gestures, actions, characters, visual situations and other contextual cues can significantly change the interpretation of the text and influence both sentiment and the intended target.
 
-The few-shot workflow is conceptually:
+A text-only model may therefore miss information such as:
+
+- Facial expressions that indicate positive or negative sentiment
+- Actions and gestures that change the meaning of the text
+- Visual situations that provide sarcastic or emotional context
+- The identity or role of the person or group being referred to
+- Visual cues that help determine the intended target
+- Contradictions between the literal OCR text and the visual meaning of the meme
+
+The few-shot workflow is:
 
 ```text
-Meme / OCR
-   +
-Few-shot examples
-   v
-GPT-based semantic interpretation
-   v
+Meme Image + OCR Text
+          +
+Few-Shot Examples
+          |
+          v
+   GPT Multimodal Analysis
+          |
+          v
+Visual Context + Textual Context
+          |
+          v
 Candidate Sentiment / Target
+
+The few-shot examples provide the model with representative labelled cases so that it can reason about the relationship between the meme image, its extracted text and the expected classification.
 ```
-
-However, the GPT component should be understood as an **auxiliary experimental component**.
-
-The uploaded PyTorch notebook does not call a GPT API inside the model's `forward()` method. Its actual core architecture is SigLIP + IndicBERT + multimodal fusion + task-specific heads, with optional cached Qwen features disabled by default. fileciteturn36file0L196-L210
 
 ---
 
@@ -998,187 +1019,4 @@ Pair / Triplet / 4-Way Search
       │
       ▼
 High-Support Logical Configurations
-      │
-      ▼
-Optional Prediction Refinement
-```
-
----
-
-# 39. Conclusion
-
-This work combines **multimodal representation learning, task-aware multi-task classification, imbalance-aware optimization, statistical label analysis and auxiliary few-shot semantic reasoning** for Tamil and Telugu meme understanding.
-
-The central architectural idea is to avoid treating the meme as either an image or a text document. Instead, visual, OCR and contextual representations are allowed to interact before producing task-specific representations.
-
-The second key idea is to avoid assuming that the five labels are statistically independent. Cramér's V is used to discover candidate dependencies, while conditional probability and higher-order combinations are used to identify **specific, logically valid configurations** that are less vulnerable to the severe skew of the individual categories.
-
-The resulting pipeline is therefore:
-
----
-
-## Citation / Attribution
-
-If this system is used in a research submission, cite the underlying benchmark/shared-task dataset and the pretrained models used by the implementation.
-
-**Core pretrained components:**
-
-- Google SigLIP
-- AI4Bharat IndicBERTv2
-- Optional Qwen2.5-VL cached representations
-
-**Implementation basis:** `final_multimodal_hasoc_architecture_FIXED.ipynb`
-
-# Statistical Relationship Analysis with Cramér's V
-
-Cramér's V is used to measure the strength of association between two categorical variables in the training data.
-
-For every pair of tasks, a contingency table is first constructed. The table counts how frequently each combination of category values occurs. A Chi-square test is then applied to this contingency table, and the resulting statistic is converted into Cramér's V.
-
-The resulting value ranges from 0 to 1:
-
-- **0** indicates little or no association.
-- **Higher values** indicate stronger association between the categorical variables.
-
-For example, the analysis evaluates relationships such as:
-
-```text
-Sentiment <-> Sarcasm
-Vulgarity <-> Abuse
-Sentiment <-> Abuse
-Sentiment <-> Vulgarity
-Sarcasm <-> Abuse
-Sarcasm <-> Vulgarity
-```
-
-The analysis is performed independently for Tamil and Telugu because the label distributions and task dependencies can differ between the two languages.
-
-## Why Cramér's V was used
-
-The objective was not to assume that the five prediction tasks are independent. Some task combinations show useful statistical dependencies in the training data.
-
-However, a simple pairwise relationship can be misleading when the dataset is highly imbalanced. For example, if one category represents the large majority of the samples, a pairwise rule may appear useful mainly because of the majority-class distribution.
-
-Therefore, Cramér's V is used as an initial statistical measure to identify potentially meaningful relationships rather than directly converting every pairwise association into a prediction rule.
-
-## Conditional Relationship Analysis
-
-After identifying useful associations, the analysis examines directional conditional relationships.
-
-For a condition and an outcome, the conditional percentage is calculated as:
-
-```text
-Conditional Percentage =
-Count(condition and outcome) / Count(condition) * 100
-```
-
-For example:
-
-```text
-Neutral + Not Vulgar + Non-Abusive
-                ->
-            Sarcasm = Yes
-```
-
-The analysis records:
-
-- The condition
-- The predicted outcome
-- Number of samples satisfying the condition
-- Number of samples supporting the outcome
-- Conditional percentage
-
-This allows high-confidence relationships to be distinguished from relationships that are based on very few observations.
-
-## Higher-Order Relationships
-
-Because pairwise relationships can be affected by data skewness, the analysis does not stop at two-category relationships.
-
-It searches for:
-
-```text
-Pair:
-A + B -> C
-
-Triplet:
-A + B + C -> D
-
-Four-way:
-A + B + C + D -> E
-```
-
-Only logically valid combinations of the available task categories are considered.
-
-This allows the system to exploit relationships between **multiple task predictions simultaneously** instead of relying on a single pairwise dependency.
-
-# Project Structure
-
-```text
-.
-├── final_multimodal_hasoc_architecture_FIXED.ipynb
-│   └── Main training, validation, inference and evaluation pipeline
-│
-├── architecture.png
-│   └── Overview of the proposed multimodal architecture
-│
-├── dataset/
-│   ├── raw/
-│   │   ├── Tamil_HASOC/
-│   │   └── Telugu_HASOC/
-│   │
-│   └── processed/
-│       └── splits/
-│           └── paddleocr/
-│               ├── tamil/
-│               └── telugu/
-│
-├── cache/
-│   ├── tamil/
-│   │   └── qwen_features/
-│   │       └── Cached Qwen2.5-VL representations
-│   │
-│   └── telugu/
-│       └── qwen_features/
-│           └── Cached Qwen2.5-VL representations
-│
-├── models/
-│   ├── tamil/
-│   │   ├── checkpoints
-│   │   ├── thresholds.json
-│   │   └── run_config.json
-│   │
-│   └── telugu/
-│       ├── checkpoints
-│       ├── thresholds.json
-│       └── run_config.json
-│
-├── outputs/
-│   ├── tamil_predictions.csv
-│   ├── tamil_predictions_probs.csv
-│   ├── telugu_predictions.csv
-│   └── telugu_predictions_probs.csv
-│
-├── reports/
-│   ├── dataset_eda/
-│   │   └── Dataset statistics and exploratory analysis
-│   │
-│   └── error_analysis/
-│       ├── Confusion matrices
-│       ├── Classification reports
-│       ├── Low-confidence predictions
-│       └── Validation error analysis
-│
-└── relationship_analysis/
-    ├── tamil_cramers_v.csv
-    ├── telugu_cramers_v.csv
-    ├── tamil_conditional_pairs_gt95.csv
-    ├── telugu_conditional_pairs_gt95.csv
-    ├── tamil_conditional_triplets_gt95.csv
-    ├── telugu_conditional_triplets_gt95.csv
-    ├── tamil_conditional_four_way_gt95.csv
-    ├── telugu_conditional_four_way_gt95.csv
-    ├── tamil_all_gt95_relationships.csv
-    ├── telugu_all_gt95_relationships.csv
-    └── tamil_vs_telugu_cramers_v.csv
-
-The same procedure is applied separately to Tamil and Telugu training data, and the resulting relationships can be used as an additional prediction-refinement signal.
+[...]
