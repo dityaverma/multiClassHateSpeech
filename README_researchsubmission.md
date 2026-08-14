@@ -1,0 +1,1252 @@
+# Multi-Modal Harmful Content Detection for Tamil & Telugu Memes
+
+<p align="center">
+  <img src="architecture.png" alt="Multimodal HASOC architecture" width="100%">
+</p>
+
+<p align="center">
+  <b>Multimodal • Multi-Task • Cross-Modal Attention • Task-Aware Gating • Statistical Relationship Analysis</b>
+</p>
+
+---
+
+## Abstract
+
+We present a multimodal multi-task framework for harmful-content analysis in **Tamil and Telugu memes**. The system jointly models the visual content of a meme and the text extracted from it using OCR. Visual information is encoded with **SigLIP**, while OCR and contextual text are represented using **IndicBERTv2**. The modality-specific representations are projected into a shared latent space and fused through a **tri-modal cross-attention block**, followed by Transformer-based fusion, learned attention pooling, and a task interaction gate.
+
+The system predicts five related tasks:
+
+- **Sentiment**
+- **Sarcasm**
+- **Vulgarity**
+- **Abuse**
+- **Target**
+
+The training pipeline additionally addresses severe class imbalance using a **multi-task weighted sampler, class-balanced Focal Loss, task-level loss weighting, staged fine-tuning, and validation-based threshold optimization**.
+
+A separate statistical analysis layer studies dependencies among the categorical labels using **Cramér's V and conditional probability**. Rather than blindly applying pairwise label relationships, we search for **logically valid multi-category configurations** involving pairs, triplets, and four-way combinations. This is motivated by the strong class skew present in the data: an apparent pairwise dependency can otherwise be dominated by majority classes.
+
+We also explored **few-shot GPT-based semantic analysis** for difficult multiclass cases, particularly Sentiment and Target. This component is treated as an auxiliary analysis/prediction strategy rather than being claimed as part of the core PyTorch forward pass in the submitted notebook.
+
+---
+
+## 1. Task Definition
+
+The problem is formulated as a five-task classification problem over Tamil and Telugu memes.
+
+| Task | Problem type | Output |
+|---|---|---|
+| Sentiment | Multiclass | Negative / Neutral / Positive |
+| Sarcasm | Binary | No / Yes |
+| Vulgarity | Binary | Not Vulgar / Vulgar |
+| Abuse | Binary | Non-Abusive / Abusive |
+| Target | Multiclass | Gender / Individual / None / Others / Political / Social Sub-Groups |
+
+The implementation defines these five task heads explicitly and maps the internal `vulgar` task to the official `vulgarity` submission column. fileciteturn36file0L244-L270
+
+---
+
+# 2. Architecture
+
+The core architecture implemented in the notebook is:
+
+```text
+                         MEME IMAGE
+                             │
+              ┌──────────────┼──────────────┐
+              │              │              │
+              ▼              ▼              ▼
+          SigLIP           OCR Text      Context Text
+          Vision              │              │
+          Encoder             ▼              ▼
+              │          IndicBERT       IndicBERT
+              │              │              │
+              └──────────────┼──────────────┘
+                             │
+                  Optional cached Qwen
+                        representation
+                             │
+                             ▼
+                   Non-Linear Projection
+                             │
+                             ▼
+                ┌─────────────────────────┐
+                │ Tri-Modal Cross-Attn.  │
+                │ Image ↔ Text ↔ Context │
+                └────────────┬────────────┘
+                             │
+                             ▼
+                  2-Layer Transformer
+                         Fusion
+                             │
+                             ▼
+                 Learned Attention Pooling
+                             │
+                             ▼
+                       Shared MLP
+                             │
+                             ▼
+                   Task Interaction Gate
+                             │
+          ┌──────────────────┼──────────────────┐
+          ▼                  ▼                  ▼
+      Sentiment          Sarcasm            Vulgarity
+          │                  │                  │
+          └──────────────────┼──────────────────┘
+                             ▼
+                           Abuse
+                             │
+                             ▼
+                           Target
+```
+
+The actual notebook implements `TriModalCrossAttentionBlock`, `LearnedAttentionPooling`, `TaskInteractionGate`, and `SeniorMultimodalHASOCModel`. fileciteturn36file0L887-L1003
+
+---
+
+# 3. Modality Encoding
+
+## 3.1 Visual Encoder
+
+The visual branch uses:
+
+```text
+google/siglip-base-patch16-224
+```
+
+with a 768-dimensional hidden representation.
+
+The visual tokens are projected to the common fusion dimension:
+
+\[
+768 \rightarrow 256
+\]
+
+through a nonlinear projection block.
+
+The notebook explicitly configures SigLIP with `siglip_hidden_dim=768` and `d_fusion=256`. fileciteturn36file0L196-L214
+
+---
+
+## 3.2 OCR Text Encoder
+
+The OCR text branch uses:
+
+```text
+ai4bharat/IndicBERTv2-MLM-only
+```
+
+OCR text is Unicode-normalized and whitespace-cleaned while preserving the underlying Tamil/Telugu text.
+
+The maximum sequence length is:
+
+```text
+128 tokens
+```
+
+The IndicBERT representation is projected:
+
+\[
+768 \rightarrow 256
+\]
+
+The dataset implementation separately tokenizes the OCR text and contextual text. fileciteturn36file0L775-L800
+
+---
+
+## 3.3 Context Representation
+
+A separate context sequence is encoded using the same IndicBERT backbone.
+
+This gives the model three logical streams:
+
+```text
+Visual representation
++
+OCR representation
++
+Context representation
+```
+
+The three streams are not simply concatenated at the beginning. They first interact through cross-attention.
+
+---
+
+# 4. Optional Qwen Representation
+
+The notebook includes infrastructure for cached features from:
+
+```text
+Qwen/Qwen2.5-VL-3B-Instruct
+```
+
+with:
+
+```text
+qwen_context_tokens = 32
+qwen_hidden_dim = 2048
+```
+
+which can be projected:
+
+\[
+2048 \rightarrow 256
+\]
+
+However, the current configuration sets:
+
+```python
+'use_qwen_features': False
+```
+
+because the notebook expects precomputed Qwen `.pt` features and does not generate them inside the core training loop. Therefore, Qwen is an **optional extension**, not part of the default forward pass. fileciteturn36file0L196-L210
+
+---
+
+# 5. Tri-Modal Cross-Attention
+
+The central fusion mechanism is a custom tri-modal cross-attention block.
+
+### Image attends to text + context
+
+\[
+H_I' =
+Attention(Q=H_I,K=[H_T;H_C],V=[H_T;H_C])
+\]
+
+### Text attends to image + context
+
+\[
+H_T' =
+Attention(Q=H_T,K=[H_I';H_C],V=[H_I';H_C])
+\]
+
+### Context attends to image + text
+
+\[
+H_C' =
+Attention(Q=H_C,K=[H_I';H_T'],V=[H_I';H_T'])
+\]
+
+This is implemented using three separate multi-head attention modules with **8 heads**, residual connections, dropout and LayerNorm. fileciteturn36file0L897-L920
+
+The motivation is to allow the modalities to condition one another.
+
+For example:
+
+```text
+Visual expression
+       ↓
+helps interpret
+       ↓
+OCR phrase
+       ↓
+helps interpret
+       ↓
+context
+```
+
+This is particularly relevant for sarcastic memes where the literal OCR text alone may not reveal the intended meaning.
+
+---
+
+# 6. Transformer Fusion
+
+After cross-modal interaction, the image, text and context tokens are concatenated:
+
+\[
+H =
+[H_I';H_T';H_C']
+\]
+
+and processed using a Transformer encoder with:
+
+| Parameter | Value |
+|---|---:|
+| Layers | 2 |
+| Attention heads | 8 |
+| Model dimension | 256 |
+| Feed-forward dimension | 1024 |
+| Activation | GELU |
+| Dropout | 0.2 |
+
+The implementation directly constructs this Transformer encoder after the cross-attention block. fileciteturn36file0L967-L970
+
+---
+
+# 7. Learned Attention Pooling
+
+Instead of using a fixed CLS token or simple mean pooling, the architecture learns a scalar importance score for every fused token.
+
+\[
+s_i=f(h_i)
+\]
+
+\[
+\alpha_i=
+\frac{e^{s_i}}
+{\sum_j e^{s_j}}
+\]
+
+\[
+z=\sum_i\alpha_i h_i
+\]
+
+The pooled representation is then passed through a shared MLP with LayerNorm, GELU and dropout. fileciteturn36file0L922-L929
+
+---
+
+# 8. Task Interaction Gate
+
+The model contains five learned task queries:
+
+```text
+Sentiment
+Sarcasm
+Vulgarity
+Abuse
+Target
+```
+
+The task queries interact using a 4-head multi-head attention module.
+
+Each task representation is then gated against the shared multimodal representation:
+
+\[
+g_k =
+\sigma(W[h_k;z])
+\]
+
+\[
+z_k = g_k \odot z
+\]
+
+where \(k\) denotes the task.
+
+This allows the model to produce **task-specific views of the same multimodal representation**.
+
+The implementation creates one learned query per task and produces five gated representations. fileciteturn36file0L931-L948
+
+---
+
+# 9. Task-Specific Heads
+
+Each task has its own classification head:
+
+```text
+Dropout
+   ↓
+Linear(256 → number of classes)
+```
+
+Therefore the model does not force all tasks to share the same final decision boundary.
+
+The resulting structure is:
+
+```text
+                         Shared Multimodal Feature
+                                  │
+                         Task Interaction Gate
+                                  │
+             ┌────────────┬───────┼───────┬────────────┐
+             ▼            ▼       ▼       ▼            ▼
+        Sentiment      Sarcasm  Vulgar   Abuse       Target
+```
+
+The five heads are explicitly constructed in the model's `ModuleDict`. fileciteturn36file0L950-L980
+
+---
+
+# 10. Data Processing
+
+The notebook includes a dynamic EDA and data-integrity stage.
+
+It checks:
+
+- CSV availability
+- Sample counts
+- Class distributions
+- OCR statistics
+- Duplicate OCR text
+- Missing images
+- Corrupt images
+- Cached Qwen coverage
+
+The EDA outputs are written under:
+
+```text
+reports/dataset_eda/
+```
+
+The official unlabeled test files are kept separate from training/validation splitting. fileciteturn36file0L24-L34
+
+---
+
+# 11. OCR Preprocessing
+
+OCR text is normalized using Unicode NFKC normalization.
+
+The preprocessing removes redundant repetitions of:
+
+```text
+!!!
+???
+...
+```
+
+and collapses repeated whitespace.
+
+The implementation deliberately avoids aggressive language-specific normalization so that Tamil/Telugu characters, code-mixed text and semantic cues remain available to IndicBERT. fileciteturn36file0L605-L616
+
+---
+
+# 12. Image Augmentation
+
+Training images can undergo lightweight augmentations:
+
+- Small random rotation
+- Brightness variation
+- Contrast variation
+- JPEG quality degradation
+
+The augmentation is intentionally moderate because aggressive transformations can alter meme text or visual semantics. fileciteturn36file0L618-L644
+
+---
+
+# 13. Handling Class Imbalance
+
+The dataset is highly imbalanced, especially for:
+
+```text
+Vulgarity
+Abuse
+```
+
+The pipeline therefore combines multiple mechanisms.
+
+## 13.1 Multi-task weighted sampling
+
+A `WeightedRandomSampler` is constructed using all task labels.
+
+For each task:
+
+\[
+w_c =
+\frac{N}
+{K n_c}
+\]
+
+where:
+
+- \(N\) = number of training samples
+- \(K\) = number of classes
+- \(n_c\) = class frequency
+
+Task-specific sample weights are normalized and accumulated across tasks.
+
+This prevents the sampler from focusing on only one label distribution. fileciteturn36file0L688-L706
+
+---
+
+# 14. Class-Balanced Focal Loss
+
+The core loss is Focal Loss:
+
+\[
+L =
+-\alpha_t(1-p_t)^\gamma \log(p_t)
+\]
+
+with:
+
+\[
+\gamma=2.0
+\]
+
+The class weight \(\alpha_t\) is computed from inverse class frequency on the **training split only**:
+
+\[
+\alpha_c
+=
+\frac{1/n_c}
+{\sum_j 1/n_j}
+\times K
+\]
+
+This gives greater influence to minority classes.
+
+The implementation computes these weights dynamically for every task. fileciteturn37file0L135-L147
+
+---
+
+# 15. Task-Level Loss Weighting
+
+The total multi-task objective is:
+
+\[
+L_{total}
+=
+\sum_k \lambda_kL_k
+\]
+
+with:
+
+| Task | Weight |
+|---|---:|
+| Sentiment | 1.0 |
+| Sarcasm | 1.2 |
+| Vulgarity | 2.0 |
+| Abuse | 2.5 |
+| Target | 1.0 |
+
+Thus the training objective gives additional emphasis to the more difficult/imbalanced binary harmful-content tasks. fileciteturn36file0L227-L242
+
+---
+
+# 16. Staged Fine-Tuning
+
+Training uses two stages.
+
+## Stage 1 — Fusion/head adaptation
+
+The pretrained SigLIP and IndicBERT backbones are frozen.
+
+Only the newly initialized multimodal fusion and task-specific layers are optimized.
+
+```text
+Epochs: 10
+LR: 1e-4
+```
+
+## Stage 2 — Selective backbone fine-tuning
+
+The top two SigLIP layers and top two IndicBERT encoder layers are unfrozen.
+
+Learning rates:
+
+```text
+Backbone: 1e-5
+Task/fusion layers: 5e-5
+```
+
+This provides a conservative form of differential fine-tuning.
+
+The staged freezing/unfreezing strategy is implemented explicitly in the training loop. fileciteturn37file0L185-L216
+
+---
+
+# 17. Optimization
+
+The training configuration uses:
+
+| Parameter | Value |
+|---|---:|
+| Optimizer | AdamW |
+| Stage 1 LR | \(1\times10^{-4}\) |
+| Stage 2 backbone LR | \(1\times10^{-5}\) |
+| Stage 2 head LR | \(5\times10^{-5}\) |
+| Weight decay | \(10^{-2}\) |
+| Warm-up ratio | 0.1 |
+| Gradient clipping | 1.0 |
+| Gradient accumulation | 2 |
+| Batch size | 8 |
+| Effective batch size | 16 |
+
+A cosine schedule with warm-up is used in both training stages. fileciteturn36file0L213-L226 fileciteturn37file0L219-L263
+
+---
+
+# 18. Evaluation Protocol
+
+The primary metric is **Macro-F1**.
+
+For each task, the pipeline reports:
+
+- Macro-F1
+- Accuracy
+- Macro Precision
+- Macro Recall
+
+The overall score is:
+
+\[
+F1_{mean}
+=
+\frac{1}{5}
+\sum_{k=1}^{5}F1_k
+\]
+
+The checkpoint saver tracks:
+
+- Best overall mean Macro-F1
+- Best Sentiment F1
+- Best Sarcasm F1
+- Best Vulgarity F1
+- Best Abuse F1
+- Best Target F1
+
+The checkpoint contains the complete model, optimizer, scheduler, scaler, epoch, thresholds, validation metrics and configuration. fileciteturn37file0L63-L92
+
+---
+
+# 19. Threshold Optimization
+
+The three binary tasks are not forced to use the default 0.5 threshold.
+
+For:
+
+```text
+Sarcasm
+Vulgarity
+Abuse
+```
+
+the validation probabilities are searched over:
+
+\[
+0.20,0.22,\ldots,0.78
+\]
+
+and the threshold producing the highest validation Macro-F1 is retained.
+
+This is performed **only on the validation set**. fileciteturn37file0L336-L354
+
+Multiclass Sentiment and Target predictions use argmax.
+
+---
+
+# 20. Error Analysis
+
+The pipeline exports:
+
+```text
+all_validation_predictions.csv
+lowest_confidence.csv
+worst_predictions.csv
+```
+
+and generates:
+
+```text
+confusion_matrices/
+```
+
+for every task.
+
+This enables targeted inspection of:
+
+- Minority-class failures
+- Low-confidence examples
+- Samples with multiple simultaneous task errors
+- Systematic confusion between classes
+
+The implementation records per-task target, prediction, confidence and error flags. fileciteturn37file0L356-L410
+
+---
+
+# 21. Statistical Feature Engineering with Cramér's V
+
+The neural architecture is complemented by a separate categorical relationship analysis.
+
+For two categorical variables \(X\) and \(Y\):
+
+\[
+V =
+\sqrt{
+\frac{\chi^2}
+{N\min(r-1,c-1)}
+}
+\]
+
+where:
+
+- \(N\) is the sample count
+- \(r\) is the number of rows in the contingency table
+- \(c\) is the number of columns
+- \(\chi^2\) is the Chi-square statistic
+
+The analysis is run **separately for Tamil and Telugu**.
+
+---
+
+# 22. Why Cramér's V?
+
+The five tasks are not necessarily independent.
+
+For example, sentiment may provide information about sarcasm, while vulgarity may provide information about abuse.
+
+However, direct pairwise rules are risky because the dataset is highly skewed.
+
+Consider a highly imbalanced binary task:
+
+```text
+Not Vulgar     ████████████████████
+Vulgar         █
+```
+
+A pairwise relationship can appear strong simply because the majority class dominates.
+
+Therefore, Cramér's V is used as an **association-screening statistic**, not as a direct prediction rule.
+
+---
+
+# 23. Conditional Probability
+
+After identifying potentially useful associations, we calculate directional conditional probabilities:
+
+\[
+P(B=b|A=a)
+=
+\frac{Count(A=a,B=b)}
+{Count(A=a)}
+\]
+
+This is different from Cramér's V.
+
+Cramér's V measures:
+
+\[
+A \leftrightarrow B
+\]
+
+while conditional probability measures:
+
+\[
+A=a \rightarrow B=b
+\]
+
+The direction therefore matters.
+
+---
+
+# 24. Multi-Category Relationship Search
+
+Because of class skewness, we do not rely only on relationships such as:
+
+```text
+Sentiment → Sarcasm
+```
+
+Instead, the analysis searches for:
+
+```text
+Sentiment + Sarcasm → Abuse
+```
+
+```text
+Sentiment + Vulgarity → Abuse
+```
+
+```text
+Sentiment + Sarcasm + Vulgarity → Abuse
+```
+
+and other logically valid configurations.
+
+The search is performed for:
+
+1. Pair conditions
+2. Triplet conditions
+3. Four-way conditions
+
+Each result stores:
+
+- Condition
+- Outcome
+- Condition count
+- Outcome count
+- Conditional percentage
+
+This allows a 100% relationship based on a small number of observations to be distinguished from a high-confidence relationship supported by hundreds of samples.
+
+---
+
+# 25. Tamil and Telugu Are Analyzed Independently
+
+We do not assume that the same label relationships hold equally across both languages.
+
+The pipeline therefore computes:
+
+```text
+Tamil
+  ↓
+Contingency analysis
+  ↓
+Cramér's V
+  ↓
+Conditional combinations
+```
+
+and independently:
+
+```text
+Telugu
+  ↓
+Contingency analysis
+  ↓
+Cramér's V
+  ↓
+Conditional combinations
+```
+
+The strongest relationships can therefore be language-specific.
+
+---
+
+# 26. Few-Shot GPT Analysis
+
+We additionally explored **few-shot GPT-based semantic prediction/analysis** for difficult multiclass cases.
+
+The motivation is that a large language/vision-language model can sometimes recognize semantic patterns in a meme that are difficult for a supervised classifier to learn from a relatively small and skewed dataset.
+
+The few-shot workflow is conceptually:
+
+```text
+Meme / OCR
+   +
+Few-shot examples
+   ↓
+GPT-based semantic interpretation
+   ↓
+Candidate Sentiment / Target
+```
+
+However, the GPT component should be understood as an **auxiliary experimental component**.
+
+The uploaded PyTorch notebook does not call a GPT API inside the model's `forward()` method. Its actual core architecture is SigLIP + IndicBERT + multimodal fusion + task-specific heads, with optional cached Qwen features disabled by default. fileciteturn36file0L196-L210
+
+---
+
+# 27. Why Multiclass GPT Prediction Was Not Used as the Core Model
+
+Sentiment and Target are multiclass problems with substantial class imbalance.
+
+Direct few-shot multiclass predictions can therefore be inconsistent across minority categories.
+
+Rather than replacing the supervised model with GPT predictions, we use the few-shot model as:
+
+- An auxiliary semantic signal
+- A difficult-example analysis tool
+- A source of hypotheses for multiclass errors
+
+The supervised multimodal model remains the primary reproducible prediction architecture.
+
+---
+
+# 28. Relationship-Based Prediction Refinement
+
+The statistical analysis can be used as a **post-prediction diagnostic/refinement layer**.
+
+The workflow is:
+
+```text
+Model Predictions
+       │
+       ▼
+Predicted task labels/probabilities
+       │
+       ▼
+Check high-confidence
+multi-category configurations
+       │
+       ▼
+Compare with training-derived
+conditional relationships
+       │
+       ▼
+Flag or conservatively refine
+inconsistent predictions
+```
+
+The important design principle is:
+
+> We do not treat a pairwise correlation as a deterministic rule.
+
+Instead, multiple category conditions are considered jointly, and the support count is inspected before a relationship is considered useful.
+
+---
+
+# 29. Avoiding Label Leakage
+
+All statistical relationships must be learned from the training portion.
+
+The validation set is used for:
+
+- Model selection
+- Threshold optimization
+- Error analysis
+
+The official unlabeled test set is reserved for final inference.
+
+The notebook explicitly separates the official test CSV from the annotated training/validation data. fileciteturn36file0L477-L541
+
+---
+
+# 30. Reproducibility
+
+The pipeline includes:
+
+- Deterministic random seeding
+- Local Hugging Face caching
+- Dynamic path resolution
+- Full optimizer/scheduler/scaler checkpoints
+- Configuration export
+- Threshold export
+- Automatic Tamil/Telugu execution
+- GPU memory cleanup between languages
+
+The notebook runs:
+
+```python
+for lang in ['tamil', 'telugu']:
+    ...
+```
+
+and explicitly releases the model and CUDA cache before moving to the next language. fileciteturn37file0L582-L665
+
+---
+
+# 31. Output Artifacts
+
+A successful run produces:
+
+```text
+outputs/
+├── tamil_predictions.csv
+├── tamil_predictions_probs.csv
+├── telugu_predictions.csv
+└── telugu_predictions_probs.csv
+```
+
+alongside:
+
+```text
+models/
+├── tamil/
+│   ├── best_mean_macro_f1.pt
+│   ├── best_sentiment.pt
+│   ├── best_sarcasm.pt
+│   ├── best_vulgar.pt
+│   ├── best_abuse.pt
+│   ├── best_target.pt
+│   ├── thresholds.json
+│   └── run_config.json
+│
+└── telugu/
+    └── ...
+```
+
+and error-analysis reports under:
+
+```text
+reports/error_analysis/
+```
+
+The official inference routine writes both submission predictions and probability/confidence files. fileciteturn37file0L529-L580
+
+---
+
+# 32. Research Contributions
+
+### Multimodal meme understanding
+
+The system jointly models visual and textual information rather than treating OCR text as the complete meme representation.
+
+### Tri-modal cross-modal reasoning
+
+Image, OCR text and context interact through dedicated cross-attention blocks.
+
+### Task-aware multi-task learning
+
+A learned task interaction gate generates task-specific representations from a shared multimodal feature.
+
+### Imbalance-aware optimization
+
+The combination of weighted sampling, class-balanced Focal Loss and task-level weighting explicitly addresses the long-tail label distribution.
+
+### Language-aware statistical analysis
+
+Tamil and Telugu are analyzed independently rather than assuming identical task dependencies.
+
+### Higher-order relationship discovery
+
+The statistical layer searches for multi-category configurations rather than relying solely on pairwise relationships.
+
+### Validation-aware decision thresholds
+
+Binary task thresholds are optimized against validation Macro-F1.
+
+### Auxiliary few-shot semantic analysis
+
+Few-shot GPT analysis is used as an auxiliary mechanism for difficult semantic and multiclass cases rather than replacing the core supervised model.
+
+---
+
+# 33. Experimental Results
+
+> **Results should be inserted from the final validation/submission run. No numerical performance values are hard-coded here because the uploaded notebook defines the evaluation pipeline but does not provide a final reproducible result table in its source.**
+
+Recommended reporting format:
+
+| Language | Sentiment | Sarcasm | Vulgarity | Abuse | Target | Mean Macro-F1 |
+|---|---:|---:|---:|---:|---:|---:|
+| Tamil | — | — | — | — | — | — |
+| Telugu | — | — | — | — | — | — |
+
+For a research submission, report both **Macro-F1 and Accuracy**, but use Macro-F1 as the primary metric because of class imbalance.
+
+---
+
+# 34. Limitations
+
+### Data imbalance
+
+Rare classes remain difficult despite class-balanced sampling and Focal Loss.
+
+### Statistical association is not causation
+
+Cramér's V identifies association, not causal dependency.
+
+### Pairwise relationships can be misleading
+
+Majority-class skew can make simple pairwise rules unreliable.
+
+### Higher-order relationships have support constraints
+
+Some combinations occur rarely, so a perfect conditional probability does not automatically imply generalization.
+
+### Few-shot GPT variability
+
+GPT-based few-shot predictions depend on prompt examples and may be inconsistent for minority multiclass categories.
+
+### Optional Qwen features
+
+Qwen support depends on precomputed cached representations and is disabled in the default configuration.
+
+---
+
+# 35. Reproducibility Checklist
+
+Before reporting final results:
+
+- [ ] Use the same train/validation split.
+- [ ] Keep the official unlabeled test set isolated.
+- [ ] Generate OCR with the same preprocessing pipeline.
+- [ ] Use the same pretrained checkpoints.
+- [ ] Keep `SEED=42`.
+- [ ] Record `run_config.json`.
+- [ ] Record `thresholds.json`.
+- [ ] Save the best mean Macro-F1 checkpoint.
+- [ ] Report per-task Macro-F1.
+- [ ] Report the mean Macro-F1.
+- [ ] Report class-wise results for minority categories.
+- [ ] Report Tamil and Telugu separately.
+- [ ] Do not derive statistical relationships from test labels.
+
+---
+
+# 36. Project Structure
+
+```text
+.
+├── final_multimodal_hasoc_architecture_FIXED.ipynb
+├── architecture.svg
+├── dataset/
+│   ├── raw/
+│   │   ├── Tamil_HASOC/
+│   │   └── Telugu_HASOC/
+│   └── processed/
+│       └── splits/
+│           └── paddleocr/
+│               ├── tamil/
+│               └── telugu/
+│
+├── cache/
+│   ├── tamil/
+│   │   └── qwen_features/
+│   └── telugu/
+│       └── qwen_features/
+│
+├── models/
+├── outputs/
+├── reports/
+│   ├── dataset_eda/
+│   └── error_analysis/
+│
+└── relationship_analysis/
+```
+
+---
+
+# 37. Key Configuration
+
+```python
+CONFIG = {
+    "siglip_model_name": "google/siglip-base-patch16-224",
+    "indicbert_model_name": "ai4bharat/IndicBERTv2-MLM-only",
+    "qwen_model_name": "Qwen/Qwen2.5-VL-3B-Instruct",
+
+    "use_qwen_features": False,
+
+    "d_fusion": 256,
+    "max_seq_len": 128,
+
+    "batch_size": 8,
+    "grad_accum_steps": 2,
+
+    "stage1_epochs": 10,
+    "stage2_epochs": 10,
+
+    "lr_head_stage1": 1e-4,
+    "lr_head_stage2": 5e-5,
+    "lr_backbone_stage2": 1e-5,
+
+    "weight_decay": 1e-2,
+    "warmup_ratio": 0.1,
+    "max_grad_norm": 1.0,
+
+    "focal_gamma": 2.0
+}
+```
+
+The task-level loss weights are:
+
+```python
+{
+    "sentiment": 1.0,
+    "sarcasm": 1.2,
+    "vulgar": 2.0,
+    "abuse": 2.5,
+    "target": 1.0
+}
+```
+
+These values are directly defined in the submitted notebook. fileciteturn36file0L196-L242
+
+---
+
+# 38. End-to-End Method
+
+The complete method can be summarized as:
+
+```text
+                  Tamil / Telugu Meme
+                          │
+                          ▼
+                ┌─────────────────┐
+                │   Data / OCR    │
+                └────────┬────────┘
+                         │
+             ┌───────────┼───────────┐
+             ▼           ▼           ▼
+          SigLIP      IndicBERT    IndicBERT
+          Image         OCR         Context
+             │           │           │
+             └───────────┼───────────┘
+                         ▼
+                Shared 256-D Space
+                         │
+                         ▼
+              Tri-Modal Cross Attention
+                         │
+                         ▼
+                Transformer Fusion
+                         │
+                         ▼
+             Learned Attention Pooling
+                         │
+                         ▼
+                     Shared MLP
+                         │
+                         ▼
+                Task Interaction Gate
+                         │
+          ┌──────────────┼──────────────┐
+          ▼              ▼              ▼
+      Sentiment       Sarcasm        Vulgarity
+          │              │              │
+          └──────────────┼──────────────┘
+                         ▼
+                       Abuse
+                         │
+                         ▼
+                       Target
+                         │
+                         ▼
+                 Validation Metrics
+                         │
+          ┌──────────────┴──────────────┐
+          ▼                             ▼
+  Threshold Optimization        Error Analysis
+          │                             │
+          └──────────────┬──────────────┘
+                         ▼
+                  Official Inference
+                         │
+                         ▼
+                 Submission CSVs
+```
+
+In parallel, the training labels are analyzed through:
+
+```text
+Training Labels
+      │
+      ▼
+Contingency Tables
+      │
+      ▼
+Cramér's V
+      │
+      ▼
+Conditional Probability
+      │
+      ▼
+Pair / Triplet / 4-Way Search
+      │
+      ▼
+High-Support Logical Configurations
+      │
+      ▼
+Optional Prediction Refinement
+```
+
+---
+
+# 39. Conclusion
+
+This work combines **multimodal representation learning, task-aware multi-task classification, imbalance-aware optimization, statistical label analysis and auxiliary few-shot semantic reasoning** for Tamil and Telugu meme understanding.
+
+The central architectural idea is to avoid treating the meme as either an image or a text document. Instead, visual, OCR and contextual representations are allowed to interact before producing task-specific representations.
+
+The second key idea is to avoid assuming that the five labels are statistically independent. Cramér's V is used to discover candidate dependencies, while conditional probability and higher-order combinations are used to identify **specific, logically valid configurations** that are less vulnerable to the severe skew of the individual categories.
+
+The resulting pipeline is therefore:
+
+\[
+\boxed{
+\text{Multimodal Encoding}
+\rightarrow
+\text{Cross-Modal Fusion}
+\rightarrow
+\text{Task-Aware Prediction}
+\rightarrow
+\text{Statistical Relationship Analysis}
+\rightarrow
+\text{Validated Inference}
+}
+\]
+
+---
+
+## Citation / Attribution
+
+If this system is used in a research submission, cite the underlying benchmark/shared-task dataset and the pretrained models used by the implementation.
+
+**Core pretrained components:**
+
+- Google SigLIP
+- AI4Bharat IndicBERTv2
+- Optional Qwen2.5-VL cached representations
+
+**Implementation basis:** `final_multimodal_hasoc_architecture_FIXED.ipynb`
