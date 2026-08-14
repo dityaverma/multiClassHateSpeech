@@ -42,7 +42,7 @@ The problem is formulated as a five-task classification problem over Tamil and T
 | Abuse | Binary | Non-Abusive / Abusive |
 | Target | Multiclass | Gender / Individual / None / Others / Political / Social Sub-Groups |
 
-The implementation defines these five task heads explicitly and maps the internal `vulgar` task to the official `vulgarity` submission column. fileciteturn36file0L244-L270
+The implementation defines these five task heads explicitly and maps the internal `vulgar` task to the official `vulgarity` submission column. fileciteturn36file0L244-L270
 
 ---
 
@@ -71,8 +71,8 @@ The core architecture implemented in the notebook is:
                              │
                              ▼
                 ┌─────────────────────────┐
-                │ Tri-Modal Cross-Attn.  │
-                │ Image ↔ Text ↔ Context │
+                │ Tri-Modal Cross-Attention  │
+                │ Image <-> Text <-> Context │
                 └────────────┬────────────┘
                              │
                              ▼
@@ -100,7 +100,7 @@ The core architecture implemented in the notebook is:
                            Target
 ```
 
-The actual notebook implements `TriModalCrossAttentionBlock`, `LearnedAttentionPooling`, `TaskInteractionGate`, and `SeniorMultimodalHASOCModel`. fileciteturn36file0L887-L1003
+The actual notebook implements `TriModalCrossAttentionBlock`, `LearnedAttentionPooling`, `TaskInteractionGate`, and `SeniorMultimodalHASOCModel`. fileciteturn36file0L887-L1003
 
 ---
 
@@ -118,13 +118,9 @@ with a 768-dimensional hidden representation.
 
 The visual tokens are projected to the common fusion dimension:
 
-\[
-768 \rightarrow 256
-\]
-
 through a nonlinear projection block.
 
-The notebook explicitly configures SigLIP with `siglip_hidden_dim=768` and `d_fusion=256`. fileciteturn36file0L196-L214
+The notebook explicitly configures SigLIP with `siglip_hidden_dim=768` and `d_fusion=256`. fileciteturn36file0L196-L214
 
 ---
 
@@ -146,11 +142,7 @@ The maximum sequence length is:
 
 The IndicBERT representation is projected:
 
-\[
-768 \rightarrow 256
-\]
-
-The dataset implementation separately tokenizes the OCR text and contextual text. fileciteturn36file0L775-L800
+The dataset implementation separately tokenizes the OCR text and contextual text. fileciteturn36file0L775-L800
 
 ---
 
@@ -183,15 +175,9 @@ Qwen/Qwen2.5-VL-3B-Instruct
 with:
 
 ```text
-qwen_context_tokens = 32
-qwen_hidden_dim = 2048
 ```
 
 which can be projected:
-
-\[
-2048 \rightarrow 256
-\]
 
 However, the current configuration sets:
 
@@ -199,7 +185,7 @@ However, the current configuration sets:
 'use_qwen_features': False
 ```
 
-because the notebook expects precomputed Qwen `.pt` features and does not generate them inside the core training loop. Therefore, Qwen is an **optional extension**, not part of the default forward pass. fileciteturn36file0L196-L210
+because the notebook expects precomputed Qwen `.pt` features and does not generate them inside the core training loop. Therefore, Qwen is an **optional extension**, not part of the default forward pass. fileciteturn36file0L196-L210
 
 ---
 
@@ -209,26 +195,11 @@ The central fusion mechanism is a custom tri-modal cross-attention block.
 
 ### Image attends to text + context
 
-\[
-H_I' =
-Attention(Q=H_I,K=[H_T;H_C],V=[H_T;H_C])
-\]
-
 ### Text attends to image + context
-
-\[
-H_T' =
-Attention(Q=H_T,K=[H_I';H_C],V=[H_I';H_C])
-\]
 
 ### Context attends to image + text
 
-\[
-H_C' =
-Attention(Q=H_C,K=[H_I';H_T'],V=[H_I';H_T'])
-\]
-
-This is implemented using three separate multi-head attention modules with **8 heads**, residual connections, dropout and LayerNorm. fileciteturn36file0L897-L920
+This is implemented using three separate multi-head attention modules with **8 heads**, residual connections, dropout and LayerNorm. fileciteturn36file0L897-L920
 
 The motivation is to allow the modalities to condition one another.
 
@@ -236,13 +207,13 @@ For example:
 
 ```text
 Visual expression
-       ↓
+       v
 helps interpret
-       ↓
+       v
 OCR phrase
-       ↓
+       v
 helps interpret
-       ↓
+       v
 context
 ```
 
@@ -253,11 +224,6 @@ This is particularly relevant for sarcastic memes where the literal OCR text alo
 # 6. Transformer Fusion
 
 After cross-modal interaction, the image, text and context tokens are concatenated:
-
-\[
-H =
-[H_I';H_T';H_C']
-\]
 
 and processed using a Transformer encoder with:
 
@@ -270,7 +236,7 @@ and processed using a Transformer encoder with:
 | Activation | GELU |
 | Dropout | 0.2 |
 
-The implementation directly constructs this Transformer encoder after the cross-attention block. fileciteturn36file0L967-L970
+The implementation directly constructs this Transformer encoder after the cross-attention block. fileciteturn36file0L967-L970
 
 ---
 
@@ -278,21 +244,7 @@ The implementation directly constructs this Transformer encoder after the cross-
 
 Instead of using a fixed CLS token or simple mean pooling, the architecture learns a scalar importance score for every fused token.
 
-\[
-s_i=f(h_i)
-\]
-
-\[
-\alpha_i=
-\frac{e^{s_i}}
-{\sum_j e^{s_j}}
-\]
-
-\[
-z=\sum_i\alpha_i h_i
-\]
-
-The pooled representation is then passed through a shared MLP with LayerNorm, GELU and dropout. fileciteturn36file0L922-L929
+The pooled representation is then passed through a shared MLP with LayerNorm, GELU and dropout. fileciteturn36file0L922-L929
 
 ---
 
@@ -312,20 +264,11 @@ The task queries interact using a 4-head multi-head attention module.
 
 Each task representation is then gated against the shared multimodal representation:
 
-\[
-g_k =
-\sigma(W[h_k;z])
-\]
-
-\[
-z_k = g_k \odot z
-\]
-
-where \(k\) denotes the task.
+where k denotes the task.
 
 This allows the model to produce **task-specific views of the same multimodal representation**.
 
-The implementation creates one learned query per task and produces five gated representations. fileciteturn36file0L931-L948
+The implementation creates one learned query per task and produces five gated representations. fileciteturn36file0L931-L948
 
 ---
 
@@ -335,8 +278,8 @@ Each task has its own classification head:
 
 ```text
 Dropout
-   ↓
-Linear(256 → number of classes)
+   v
+Linear(256 -> number of classes)
 ```
 
 Therefore the model does not force all tasks to share the same final decision boundary.
@@ -353,7 +296,7 @@ The resulting structure is:
         Sentiment      Sarcasm  Vulgar   Abuse       Target
 ```
 
-The five heads are explicitly constructed in the model's `ModuleDict`. fileciteturn36file0L950-L980
+The five heads are explicitly constructed in the model's `ModuleDict`. fileciteturn36file0L950-L980
 
 ---
 
@@ -378,7 +321,7 @@ The EDA outputs are written under:
 reports/dataset_eda/
 ```
 
-The official unlabeled test files are kept separate from training/validation splitting. fileciteturn36file0L24-L34
+The official unlabeled test files are kept separate from training/validation splitting. fileciteturn36file0L24-L34
 
 ---
 
@@ -396,7 +339,7 @@ The preprocessing removes redundant repetitions of:
 
 and collapses repeated whitespace.
 
-The implementation deliberately avoids aggressive language-specific normalization so that Tamil/Telugu characters, code-mixed text and semantic cues remain available to IndicBERT. fileciteturn36file0L605-L616
+The implementation deliberately avoids aggressive language-specific normalization so that Tamil/Telugu characters, code-mixed text and semantic cues remain available to IndicBERT. fileciteturn36file0L605-L616
 
 ---
 
@@ -409,7 +352,7 @@ Training images can undergo lightweight augmentations:
 - Contrast variation
 - JPEG quality degradation
 
-The augmentation is intentionally moderate because aggressive transformations can alter meme text or visual semantics. fileciteturn36file0L618-L644
+The augmentation is intentionally moderate because aggressive transformations can alter meme text or visual semantics. fileciteturn36file0L618-L644
 
 ---
 
@@ -430,21 +373,15 @@ A `WeightedRandomSampler` is constructed using all task labels.
 
 For each task:
 
-\[
-w_c =
-\frac{N}
-{K n_c}
-\]
-
 where:
 
-- \(N\) = number of training samples
-- \(K\) = number of classes
-- \(n_c\) = class frequency
+- N = number of training samples
+- K = number of classes
+- n_c = class frequency
 
 Task-specific sample weights are normalized and accumulated across tasks.
 
-This prevents the sampler from focusing on only one label distribution. fileciteturn36file0L688-L706
+This prevents the sampler from focusing on only one label distribution. fileciteturn36file0L688-L706
 
 ---
 
@@ -452,42 +389,19 @@ This prevents the sampler from focusing on only one label distribution. filec
 
 The core loss is Focal Loss:
 
-\[
-L =
--\alpha_t(1-p_t)^\gamma \log(p_t)
-\]
-
 with:
 
-\[
-\gamma=2.0
-\]
-
-The class weight \(\alpha_t\) is computed from inverse class frequency on the **training split only**:
-
-\[
-\alpha_c
-=
-\frac{1/n_c}
-{\sum_j 1/n_j}
-\times K
-\]
+The class weight \alpha_t is computed from inverse class frequency on the **training split only**:
 
 This gives greater influence to minority classes.
 
-The implementation computes these weights dynamically for every task. fileciteturn37file0L135-L147
+The implementation computes these weights dynamically for every task. fileciteturn37file0L135-L147
 
 ---
 
 # 15. Task-Level Loss Weighting
 
 The total multi-task objective is:
-
-\[
-L_{total}
-=
-\sum_k \lambda_kL_k
-\]
 
 with:
 
@@ -499,7 +413,7 @@ with:
 | Abuse | 2.5 |
 | Target | 1.0 |
 
-Thus the training objective gives additional emphasis to the more difficult/imbalanced binary harmful-content tasks. fileciteturn36file0L227-L242
+Thus the training objective gives additional emphasis to the more difficult/imbalanced binary harmful-content tasks. fileciteturn36file0L227-L242
 
 ---
 
@@ -507,7 +421,7 @@ Thus the training objective gives additional emphasis to the more difficult/imba
 
 Training uses two stages.
 
-## Stage 1 — Fusion/head adaptation
+## Stage 1 -- Fusion/head adaptation
 
 The pretrained SigLIP and IndicBERT backbones are frozen.
 
@@ -518,7 +432,7 @@ Epochs: 10
 LR: 1e-4
 ```
 
-## Stage 2 — Selective backbone fine-tuning
+## Stage 2 -- Selective backbone fine-tuning
 
 The top two SigLIP layers and top two IndicBERT encoder layers are unfrozen.
 
@@ -531,7 +445,7 @@ Task/fusion layers: 5e-5
 
 This provides a conservative form of differential fine-tuning.
 
-The staged freezing/unfreezing strategy is implemented explicitly in the training loop. fileciteturn37file0L185-L216
+The staged freezing/unfreezing strategy is implemented explicitly in the training loop. fileciteturn37file0L185-L216
 
 ---
 
@@ -542,17 +456,17 @@ The training configuration uses:
 | Parameter | Value |
 |---|---:|
 | Optimizer | AdamW |
-| Stage 1 LR | \(1\times10^{-4}\) |
-| Stage 2 backbone LR | \(1\times10^{-5}\) |
-| Stage 2 head LR | \(5\times10^{-5}\) |
-| Weight decay | \(10^{-2}\) |
+| Stage 1 LR | 1\times10^{-4} |
+| Stage 2 backbone LR | 1\times10^{-5} |
+| Stage 2 head LR | 5\times10^{-5} |
+| Weight decay | 10^{-2} |
 | Warm-up ratio | 0.1 |
 | Gradient clipping | 1.0 |
 | Gradient accumulation | 2 |
 | Batch size | 8 |
 | Effective batch size | 16 |
 
-A cosine schedule with warm-up is used in both training stages. fileciteturn36file0L213-L226 fileciteturn37file0L219-L263
+A cosine schedule with warm-up is used in both training stages. fileciteturn36file0L213-L226 fileciteturn37file0L219-L263
 
 ---
 
@@ -569,13 +483,6 @@ For each task, the pipeline reports:
 
 The overall score is:
 
-\[
-F1_{mean}
-=
-\frac{1}{5}
-\sum_{k=1}^{5}F1_k
-\]
-
 The checkpoint saver tracks:
 
 - Best overall mean Macro-F1
@@ -585,7 +492,7 @@ The checkpoint saver tracks:
 - Best Abuse F1
 - Best Target F1
 
-The checkpoint contains the complete model, optimizer, scheduler, scaler, epoch, thresholds, validation metrics and configuration. fileciteturn37file0L63-L92
+The checkpoint contains the complete model, optimizer, scheduler, scaler, epoch, thresholds, validation metrics and configuration. fileciteturn37file0L63-L92
 
 ---
 
@@ -603,13 +510,9 @@ Abuse
 
 the validation probabilities are searched over:
 
-\[
-0.20,0.22,\ldots,0.78
-\]
-
 and the threshold producing the highest validation Macro-F1 is retained.
 
-This is performed **only on the validation set**. fileciteturn37file0L336-L354
+This is performed **only on the validation set**. fileciteturn37file0L336-L354
 
 Multiclass Sentiment and Target predictions use argmax.
 
@@ -640,7 +543,7 @@ This enables targeted inspection of:
 - Samples with multiple simultaneous task errors
 - Systematic confusion between classes
 
-The implementation records per-task target, prediction, confidence and error flags. fileciteturn37file0L356-L410
+The implementation records per-task target, prediction, confidence and error flags. fileciteturn37file0L356-L410
 
 ---
 
@@ -648,22 +551,14 @@ The implementation records per-task target, prediction, confidence and error fla
 
 The neural architecture is complemented by a separate categorical relationship analysis.
 
-For two categorical variables \(X\) and \(Y\):
-
-\[
-V =
-\sqrt{
-\frac{\chi^2}
-{N\min(r-1,c-1)}
-}
-\]
+For two categorical variables X and Y:
 
 where:
 
-- \(N\) is the sample count
-- \(r\) is the number of rows in the contingency table
-- \(c\) is the number of columns
-- \(\chi^2\) is the Chi-square statistic
+- N is the sample count
+- r is the number of rows in the contingency table
+- c is the number of columns
+- ^2 is the Chi-square statistic
 
 The analysis is run **separately for Tamil and Telugu**.
 
@@ -694,26 +589,11 @@ Therefore, Cramér's V is used as an **association-screening statistic**, not as
 
 After identifying potentially useful associations, we calculate directional conditional probabilities:
 
-\[
-P(B=b|A=a)
-=
-\frac{Count(A=a,B=b)}
-{Count(A=a)}
-\]
-
 This is different from Cramér's V.
 
 Cramér's V measures:
 
-\[
-A \leftrightarrow B
-\]
-
 while conditional probability measures:
-
-\[
-A=a \rightarrow B=b
-\]
 
 The direction therefore matters.
 
@@ -724,21 +604,21 @@ The direction therefore matters.
 Because of class skewness, we do not rely only on relationships such as:
 
 ```text
-Sentiment → Sarcasm
+Sentiment -> Sarcasm
 ```
 
 Instead, the analysis searches for:
 
 ```text
-Sentiment + Sarcasm → Abuse
+Sentiment + Sarcasm -> Abuse
 ```
 
 ```text
-Sentiment + Vulgarity → Abuse
+Sentiment + Vulgarity -> Abuse
 ```
 
 ```text
-Sentiment + Sarcasm + Vulgarity → Abuse
+Sentiment + Sarcasm + Vulgarity -> Abuse
 ```
 
 and other logically valid configurations.
@@ -769,11 +649,11 @@ The pipeline therefore computes:
 
 ```text
 Tamil
-  ↓
+  v
 Contingency analysis
-  ↓
+  v
 Cramér's V
-  ↓
+  v
 Conditional combinations
 ```
 
@@ -781,11 +661,11 @@ and independently:
 
 ```text
 Telugu
-  ↓
+  v
 Contingency analysis
-  ↓
+  v
 Cramér's V
-  ↓
+  v
 Conditional combinations
 ```
 
@@ -805,15 +685,15 @@ The few-shot workflow is conceptually:
 Meme / OCR
    +
 Few-shot examples
-   ↓
+   v
 GPT-based semantic interpretation
-   ↓
+   v
 Candidate Sentiment / Target
 ```
 
 However, the GPT component should be understood as an **auxiliary experimental component**.
 
-The uploaded PyTorch notebook does not call a GPT API inside the model's `forward()` method. Its actual core architecture is SigLIP + IndicBERT + multimodal fusion + task-specific heads, with optional cached Qwen features disabled by default. fileciteturn36file0L196-L210
+The uploaded PyTorch notebook does not call a GPT API inside the model's `forward()` method. Its actual core architecture is SigLIP + IndicBERT + multimodal fusion + task-specific heads, with optional cached Qwen features disabled by default. fileciteturn36file0L196-L210
 
 ---
 
@@ -878,7 +758,7 @@ The validation set is used for:
 
 The official unlabeled test set is reserved for final inference.
 
-The notebook explicitly separates the official test CSV from the annotated training/validation data. fileciteturn36file0L477-L541
+The notebook explicitly separates the official test CSV from the annotated training/validation data. fileciteturn36file0L477-L541
 
 ---
 
@@ -902,7 +782,7 @@ for lang in ['tamil', 'telugu']:
     ...
 ```
 
-and explicitly releases the model and CUDA cache before moving to the next language. fileciteturn37file0L582-L665
+and explicitly releases the model and CUDA cache before moving to the next language. fileciteturn37file0L582-L665
 
 ---
 
@@ -942,7 +822,7 @@ and error-analysis reports under:
 reports/error_analysis/
 ```
 
-The official inference routine writes both submission predictions and probability/confidence files. fileciteturn37file0L529-L580
+The official inference routine writes both submission predictions and probability/confidence files. fileciteturn37file0L529-L580
 
 ---
 
@@ -990,8 +870,8 @@ Recommended reporting format:
 
 | Language | Sentiment | Sarcasm | Vulgarity | Abuse | Target | Mean Macro-F1 |
 |---|---:|---:|---:|---:|---:|---:|
-| Tamil | — | — | — | — | — | — |
-| Telugu | — | — | — | — | — | — |
+| Tamil | -- | -- | -- | -- | -- | -- |
+| Telugu | -- | -- | -- | -- | -- | -- |
 
 For a research submission, report both **Macro-F1 and Accuracy**, but use Macro-F1 as the primary metric because of class imbalance.
 
@@ -1081,7 +961,6 @@ Before reporting final results:
 # 37. Key Configuration
 
 ```python
-CONFIG = {
     "siglip_model_name": "google/siglip-base-patch16-224",
     "indicbert_model_name": "ai4bharat/IndicBERTv2-MLM-only",
     "qwen_model_name": "Qwen/Qwen2.5-VL-3B-Instruct",
@@ -1121,7 +1000,7 @@ The task-level loss weights are:
 }
 ```
 
-These values are directly defined in the submitted notebook. fileciteturn36file0L196-L242
+These values are directly defined in the submitted notebook. fileciteturn36file0L196-L242
 
 ---
 
@@ -1222,20 +1101,6 @@ The central architectural idea is to avoid treating the meme as either an image 
 The second key idea is to avoid assuming that the five labels are statistically independent. Cramér's V is used to discover candidate dependencies, while conditional probability and higher-order combinations are used to identify **specific, logically valid configurations** that are less vulnerable to the severe skew of the individual categories.
 
 The resulting pipeline is therefore:
-
-\[
-\boxed{
-\text{Multimodal Encoding}
-\rightarrow
-\text{Cross-Modal Fusion}
-\rightarrow
-\text{Task-Aware Prediction}
-\rightarrow
-\text{Statistical Relationship Analysis}
-\rightarrow
-\text{Validated Inference}
-}
-\]
 
 ---
 
