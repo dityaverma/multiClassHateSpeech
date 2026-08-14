@@ -1,17 +1,5 @@
 # Multi-Modal Harmful Content Detection for Tamil & Telugu Memes
 
-![Architecture](architecture.png)
-
-<p align="center">
-  <img src="architecture.png" alt="Multimodal HASOC architecture" width="100%">
-</p>
-
-<p align="center">
-  <b>Multimodal • Multi-Task • Cross-Modal Attention • Task-Aware Gating • Statistical Relationship Analysis</b>
-</p>
-
----
-
 ## Abstract
 
 We present a multimodal multi-task framework for harmful-content analysis in **Tamil and Telugu memes**. The system jointly models the visual content of a meme and the text extracted from it using OCR. Visual information is encoded with **SigLIP**, while OCR and contextual text are represented using **IndicBERTv2**. The modality-specific representations are projected into a shared latent space and fused through a **tri-modal cross-attention block**, followed by Transformer-based fusion, learned attention pooling, and a task interaction gate.
