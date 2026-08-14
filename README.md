@@ -1,5 +1,7 @@
 # Multi-Modal Harmful Content Detection for Tamil & Telugu Memes
 
+![Architecture](architecture.png)
+
 <p align="center">
   <img src="architecture.png" alt="Multimodal HASOC architecture" width="100%">
 </p>
@@ -862,20 +864,24 @@ Few-shot GPT analysis is used as an auxiliary mechanism for difficult semantic a
 
 ---
 
-# 33. Experimental Results
+# 33. Evaluation and Output Artifacts
 
-> **Results should be inserted from the final validation/submission run. No numerical performance values are hard-coded here because the uploaded notebook defines the evaluation pipeline but does not provide a final reproducible result table in its source.**
+The system evaluates all five tasks using Macro-F1, Accuracy, Macro Precision and Macro Recall. Macro-F1 is used as the primary metric because the task distributions are highly imbalanced.
 
-Recommended reporting format:
+For each language, the pipeline records:
 
-| Language | Sentiment | Sarcasm | Vulgarity | Abuse | Target | Mean Macro-F1 |
-|---|---:|---:|---:|---:|---:|---:|
-| Tamil | -- | -- | -- | -- | -- | -- |
-| Telugu | -- | -- | -- | -- | -- | -- |
+- Per-task validation performance
+- Mean Macro-F1
+- Optimized binary thresholds
+- Confusion matrices
+- Classification reports
+- Per-sample predictions
+- Prediction confidence
+- Error flags
+- Official test predictions
+- Prediction probability files
 
-For a research submission, report both **Macro-F1 and Accuracy**, but use Macro-F1 as the primary metric because of class imbalance.
-
----
+The final prediction outputs are written separately for Tamil and Telugu and are kept independent of the validation analysis.
 
 # 34. Limitations
 
@@ -905,25 +911,22 @@ Qwen support depends on precomputed cached representations and is disabled in th
 
 ---
 
-# 35. Reproducibility Checklist
+# 35. Reproducibility
 
-Before reporting final results:
+The training and inference pipeline uses deterministic seeding, local model caching, dynamic path resolution and complete checkpoint state.
 
-- [ ] Use the same train/validation split.
-- [ ] Keep the official unlabeled test set isolated.
-- [ ] Generate OCR with the same preprocessing pipeline.
-- [ ] Use the same pretrained checkpoints.
-- [ ] Keep `SEED=42`.
-- [ ] Record `run_config.json`.
-- [ ] Record `thresholds.json`.
-- [ ] Save the best mean Macro-F1 checkpoint.
-- [ ] Report per-task Macro-F1.
-- [ ] Report the mean Macro-F1.
-- [ ] Report class-wise results for minority categories.
-- [ ] Report Tamil and Telugu separately.
-- [ ] Do not derive statistical relationships from test labels.
+Each saved checkpoint contains:
 
----
+- Model state
+- Optimizer state
+- Scheduler state
+- Mixed-precision scaler state
+- Training epoch
+- Validation metrics
+- Optimized thresholds
+- Run configuration
+
+Tamil and Telugu are processed independently, with GPU memory released between language runs.
 
 # 36. Project Structure
 
