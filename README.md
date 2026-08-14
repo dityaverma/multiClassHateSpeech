@@ -12,7 +12,7 @@
 
 ## Abstract
 
-We present a multimodal multi-task framework for harmful-content analysis in **Tamil and Telugu memes**. The system jointly models the visual content of a meme and the text extracted from it using [...]
+We present a multimodal multi-task framework for harmful-content analysis in **Tamil and Telugu memes**. The system jointly models the visual content of a meme and the text extracted from it using [..[...]
 
 The system predicts five related tasks:
 
@@ -24,9 +24,9 @@ The system predicts five related tasks:
 
 The training pipeline additionally addresses severe class imbalance using a **multi-task weighted sampler, class-balanced Focal Loss, task-level loss weighting, staged fine-tuning, and validation-[...]
 
-A separate statistical analysis layer studies dependencies among the categorical labels using **Cramér's V and conditional probability**. Rather than blindly applying pairwise label relationships[...]
+A separate statistical analysis layer studies dependencies among the categorical labels using **Cramér's V and conditional probability**. Rather than blindly applying pairwise label relationships[...[...]
 
-We also explored **few-shot GPT-based semantic analysis** for difficult multiclass cases, particularly Sentiment and Target. This component is treated as an auxiliary analysis/prediction strategy [...]
+We also explored **few-shot GPT-based semantic analysis** for difficult multiclass cases, particularly Sentiment and Target. This component is treated as an auxiliary analysis/prediction strategy [...[...]
 
 ---
 
@@ -63,10 +63,6 @@ The core architecture implemented in the notebook is:
               │              │              │
               └──────────────┼──────────────┘
                              │
-                  Optional cached Qwen
-                        representation
-                             │
-                             ▼
                    Non-Linear Projection
                              │
                              ▼
@@ -162,31 +158,6 @@ Context representation
 ```
 
 The three streams are not simply concatenated at the beginning. They first interact through cross-attention.
-
----
-
-# 4. Optional Qwen Representation
-
-The notebook includes infrastructure for cached features from:
-
-```text
-Qwen/Qwen2.5-VL-3B-Instruct
-```
-
-with:
-
-```text
-```
-
-which can be projected:
-
-However, the current configuration sets:
-
-```python
-'use_qwen_features': False
-```
-
-because the notebook expects precomputed Qwen `.pt` features and does not generate them inside the core training loop. Therefore, Qwen is an **optional extension**, not part of the default forwar[...]
 
 ---
 
@@ -314,7 +285,6 @@ It checks:
 - Duplicate OCR text
 - Missing images
 - Corrupt images
-- Cached Qwen coverage
 
 The EDA outputs are written under:
 
@@ -897,9 +867,6 @@ The final prediction outputs are written separately for Tamil and Telugu and are
 ```python
     "siglip_model_name": "google/siglip-base-patch16-224",
     "indicbert_model_name": "ai4bharat/IndicBERTv2-MLM-only",
-    "qwen_model_name": "Qwen/Qwen2.5-VL-3B-Instruct",
-
-    "use_qwen_features": False,
 
     "d_fusion": 256,
     "max_seq_len": 128,
@@ -957,47 +924,47 @@ The complete method can be summarized as:
              │           │           │
              └───────────┼───────────┘
                          ▼
-                Shared 256-D Space
+                 Shared 256-D Space
                          │
                          ▼
-              Tri-Modal Cross Attention
+               Tri-Modal Cross Attention
                          │
                          ▼
-                Transformer Fusion
+                 Transformer Fusion
                          │
                          ▼
-             Learned Attention Pooling
+              Learned Attention Pooling
                          │
                          ▼
-                     Shared MLP
+                      Shared MLP
                          │
                          ▼
-                Task Interaction Gate
+                 Task Interaction Gate
                          │
-          ┌──────────────┼──────────────┐
-          ▼              ▼              ▼
-      Sentiment       Sarcasm        Vulgarity
-          │              │              │
-          └──────────────┼──────────────┘
-                         ▼
-                       Abuse
-                         │
-                         ▼
-                       Target
-                         │
-                         ▼
-                 Validation Metrics
-                         │
-          ┌──────────────┴──────────────┐
-          ▼                             ▼
-  Threshold Optimization        Error Analysis
-          │                             │
-          └──────────────┬──────────────┘
-                         ▼
-                  Official Inference
-                         │
-                         ▼
-                 Submission CSVs
+           ┌──────────────┼──────────────┐
+           ▼              ▼              ▼
+       Sentiment       Sarcasm        Vulgarity
+           │              │              │
+           └──────────────┼──────────────┘
+                          ▼
+                        Abuse
+                          │
+                          ▼
+                        Target
+                          │
+                          ▼
+                  Validation Metrics
+                          │
+           ┌──────────────┴──────────────┐
+           ▼                             ▼
+   Threshold Optimization        Error Analysis
+           │                             │
+           └──────────────┬──────────────┘
+                          ▼
+                   Official Inference
+                          │
+                          ▼
+                  Submission CSVs
 ```
 
 In parallel, the training labels are analyzed through:
@@ -1019,4 +986,4 @@ Pair / Triplet / 4-Way Search
       │
       ▼
 High-Support Logical Configurations
-[...]
+```
